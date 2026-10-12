@@ -1,0 +1,16 @@
+# Proxy HTTPS optionnel (ENF-07) : docker compose --profile https up -d
+# L'interface est alors accessible sur https://localhost:8443 (certificat local généré par Caddy : le navigateur affiche
+# un avertissement tant que l'autorité locale n'est pas installée). En production, mettre dans .env
+# MEDIRDV_DOMAINE=rdv.exemple.sn : Caddy obtient alors un certificat public (Let's Encrypt) automatiquement.
+{$MEDIRDV_DOMAINE:localhost} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+
+	reverse_proxy interface:8501
+}

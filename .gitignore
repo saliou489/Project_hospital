@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.pytest_cache/
+.streamlit/secrets.toml
+
+# Base locale et rapport généré par l'import
+*.db
+rapport_import_rejets.csv
+
+# Secrets : jamais dans Git
+.secret_jwt
+cles_a_distribuer*.csv
+anomalies_injectees.csv
+
+# Sauvegardes (données personnelles et empreintes de clés) et mesures locales
+sauvegardes/
+*.sauvegarde.zip
+medirdv_*.zip
+.coverage
+htmlcov/
+
+# PDF générés : la copie publiée est dans livrables/
+docs/livrables/pdf/

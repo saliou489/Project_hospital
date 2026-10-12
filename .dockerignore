@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.db
+.env
+.secret_jwt
+cles_a_distribuer*.csv
+rapport_import_rejets.csv
+anomalies_injectees.csv
+tests
+.pytest_cache
+.coverage
+htmlcov

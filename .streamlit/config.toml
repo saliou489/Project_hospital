@@ -1,0 +1,12 @@
+# Couleur d'accent de l'interface : le vert du logo BAOBAB.
+# Le thème (clair ou sombre) reste celui du navigateur de chaque utilisateur ; seule la couleur d'accent change,
+# avec une nuance plus claire en thème sombre pour rester lisible.
+[theme.light]
+primaryColor = "#106848"
+
+[theme.dark]
+primaryColor = "#28a068"
+
+# Masque le bouton « Deploy » et le menu technique de Streamlit : inutiles pour le personnel de la clinique.
+[client]
+toolbarMode = "minimal"

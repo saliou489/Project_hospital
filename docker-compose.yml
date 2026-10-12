@@ -1,0 +1,132 @@
+# Déploiement complet en une commande :
+#     docker compose up -d --build
+# Prérequis : copier .env.example en .env et renseigner POSTGRES_PASSWORD et MEDIRDV_SECRET_JWT.
+# La base n'est PAS exposée à l'extérieur : seuls l'API (8000) et l'interface (8501) le sont.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: medirdv
+      POSTGRES_USER: medirdv
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Renseignez POSTGRES_PASSWORD dans le fichier .env}
+    volumes:
+      - donnees_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medirdv -d medirdv"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Migrations, import des médecins, données de démonstration et comptes : une seule fois, puis le service s'arrête.
+  initialisation:
+    build: .
+    command: ["python", "-m", "backend.initialiser"]
+    environment: &environnement_api
+      DATABASE_URL: postgresql://medirdv:${POSTGRES_PASSWORD}@db:5432/medirdv
+      MEDIRDV_SECRET_JWT: ${MEDIRDV_SECRET_JWT:?Renseignez MEDIRDV_SECRET_JWT dans le fichier .env}
+      MEDIRDV_DONNEES_DEMO: ${MEDIRDV_DONNEES_DEMO:-oui}
+      MEDIRDV_MAX_ESSAIS: ${MEDIRDV_MAX_ESSAIS:-5}
+      MEDIRDV_VERROUILLAGE_MIN: ${MEDIRDV_VERROUILLAGE_MIN:-5}
+      MEDIRDV_SESSION_HEURES: ${MEDIRDV_SESSION_HEURES:-8}
+      MEDIRDV_DOSSIER_CLES: /sortie
+      MEDIRDV_HTTPS: ${MEDIRDV_HTTPS:-non}
+      MEDIRDV_DOSSIER_SAUVEGARDES: /sauvegardes
+      MEDIRDV_NB_SAUVEGARDES: ${MEDIRDV_NB_SAUVEGARDES:-14}
+      MEDIRDV_CONSERVATION_PATIENT_ANS: ${MEDIRDV_CONSERVATION_PATIENT_ANS:-5}
+      MEDIRDV_CONSERVATION_JOURNAL_MOIS: ${MEDIRDV_CONSERVATION_JOURNAL_MOIS:-24}
+      MEDIRDV_CONSERVATION_POINTAGE_MOIS: ${MEDIRDV_CONSERVATION_POINTAGE_MOIS:-24}
+      MEDIRDV_CONSERVATION_EVALUATIONS_MOIS: ${MEDIRDV_CONSERVATION_EVALUATIONS_MOIS:-12}
+      MEDIRDV_COUT_RELANCE: ${MEDIRDV_COUT_RELANCE:-1000}
+      MEDIRDV_COUT_CRENEAU: ${MEDIRDV_COUT_CRENEAU:-15000}
+      MEDIRDV_EFFICACITE_RELANCE: ${MEDIRDV_EFFICACITE_RELANCE:-0.35}
+    volumes:
+      - sortie:/sortie
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment: *environnement_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - sauvegardes:/sauvegardes
+    depends_on:
+      db:
+        condition: service_healthy
+      initialisation:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/sante', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Module analytique : calcule les scores de risque d'absence au démarrage puis chaque nuit (02:00 par défaut).
+  # Il écrit dans la base ; l'API se contente de lire les résultats.
+  analytique:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "backend.analytique.nocturne"]
+    environment:
+      <<: *environnement_api
+      MEDIRDV_HEURE_NOCTURNE: ${MEDIRDV_HEURE_NOCTURNE:-02:00}
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Sauvegarde quotidienne (ENF-10) : une au démarrage puis une par jour à 03:00, les 14 dernières sont gardées.
+  # Procédure de restauration : docs/sauvegarde_et_conservation.md
+  sauvegarde:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "backend.sauvegarde", "boucle"]
+    environment:
+      <<: *environnement_api
+      MEDIRDV_HEURE_SAUVEGARDE: ${MEDIRDV_HEURE_SAUVEGARDE:-03:00}
+    volumes:
+      - sauvegardes:/sauvegardes
+    depends_on:
+      api:
+        condition: service_healthy
+
+  interface:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "streamlit", "run", "frontend/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    environment:
+      MEDIRDV_API_URL: http://api:8000
+      NOM_CLINIQUE: ${NOM_CLINIQUE:-BAOBAB}
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # HTTPS (ENF-07), optionnel : docker compose --profile https up -d
+  # En production, ne publiez que ce service (retirez les ports 8000 et 8501 ci-dessus) : tout passe alors par HTTPS.
+  proxy_https:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      MEDIRDV_DOMAINE: ${MEDIRDV_DOMAINE:-localhost}
+    ports:
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - donnees_caddy:/data
+    depends_on:
+      - interface
+
+volumes:
+  donnees_postgres:
+  donnees_caddy:
+  sauvegardes:
+  sortie:
